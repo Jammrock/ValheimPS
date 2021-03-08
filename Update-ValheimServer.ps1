@@ -236,7 +236,7 @@ Write-Verbose "Stopping Valheim server task."
 # stop the Valheim server task
 try
 {
-    Stop-ScheduledTask -TaskName "$gameTaskName"
+    Stop-ScheduledTask -TaskName "$gameTaskName" -EA Stop
 }
 catch {}
 
