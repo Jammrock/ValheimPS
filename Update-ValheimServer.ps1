@@ -27,7 +27,7 @@ $gameListenPort = 2456
 $gameListenProtol = "UDP"
 
 
-$gameProcessArgs = '-nographics -batchmode -name "KoolKats Valheim Realm of Madness" -port '+$gameListenPort+' -world "Dedicated" -password "KoolKatsRule!" -savedir '+$gamePath+'\save -public 0'
+$gameProcessArgs = '-nographics -batchmode -name "My Valheim Server" -port '+$gameListenPort+' -world "Dedicated" -password "MySecret" -savedir '+$gamePath+'\save -public 0'
 
 
 # the directory where steamcmd.exe is located
@@ -38,7 +38,7 @@ $steamCMDURI = 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip'
 
 
 # Steam username
-$steamUser = "Jammrock5"
+$steamUser = "Not needed for Valheim Dedicated Server"
 
 # the steam ID of the dedicated server
 $steamGameID = '896660'
