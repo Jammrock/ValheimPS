@@ -7,6 +7,7 @@
 param ( 
         [switch]$Anonymous,
         [switch]$Force,
+        [switch]$NoStart,
         [switch]$pass2SecStr = $false,
         [string]$secPass
     )
@@ -350,30 +351,35 @@ if (-NOT $isTaskFnd)
     }
 }
 
-Write-Verbose "Starting the $gameTaskName task."
-$null = Start-ScheduledTask -TaskName $gameTaskName
+if (-NOT $NoStart.IsPresent)
+{
+    Write-Verbose "Starting the $gameTaskName task."
+    $null = Start-ScheduledTask -TaskName $gameTaskName
 
-# look for Valheim_server.exe process before continuing
-Write-Verbose "Waiting for the Valheim_server process."
-do {
-    Start-Sleep -m 250
-    $process = Get-Process $gameProcessName -EA SilentlyContinue
-} until ($process)
+    # look for Valheim_server.exe process before continuing
+    Write-Verbose "Waiting for the Valheim_server process."
+    do {
+        Start-Sleep -m 250
+        $process = Get-Process $gameProcessName -EA SilentlyContinue
+    } until ($process)
 
 
-Write-Verbose "Waiting for a listener on the Valheim game port: $gameListenPort"
-Write-Verbose "This may take a very long time on first run."
-do {
-    Start-Sleep -m 250
-    if ($gameListenProtol -eq "TCP")
-    {
-        $listening = Get-NetTCPConnection -OwningProcess ($process.Id) -State Listen -LocalPort $gameListenPort -EA SilentlyContinue
-    }
-    elseif ($gameListenProtol -eq "UDP") 
-    {
-        $listening = Get-NetUDPEndpoint -OwningProcess $process.Id -LocalPort $gameListenPort -EA SilentlyContinue
-    }
-} until ($listening)
+    Write-Verbose "Waiting for a listener on the Valheim game port: $gameListenPort"
+    Write-Verbose "This may take a very long time on first run."
+    do {
+        Start-Sleep -m 250
+        if ($gameListenProtol -eq "TCP")
+        {
+            $listening = Get-NetTCPConnection -OwningProcess ($process.Id) -State Listen -LocalPort $gameListenPort -EA SilentlyContinue
+        }
+        elseif ($gameListenProtol -eq "UDP") 
+        {
+            $listening = Get-NetUDPEndpoint -OwningProcess $process.Id -LocalPort $gameListenPort -EA SilentlyContinue
+        }
+    } until ($listening)
+}
+
+
 
 
 Write-Verbose "$gameTaskName is now ready. Have fun exploring!"
