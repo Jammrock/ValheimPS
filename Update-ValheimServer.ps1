@@ -344,7 +344,7 @@ foreach ($world in $worlds)
 
     if (-NOT $isTaskFnd)
     {
-        $gameProcessArgs = '-nographics -batchmode -name "My Valheim Server" -port '+$($world.Port)+' -world "Dedicated" -password "KoolKatsRule!" -savedir '+$($world.savePath)+'\save -public 0'
+        $gameProcessArgs = '-nographics -batchmode -name "My Valheim Server" -port '+$($world.Port)+' -world "Dedicated" -password "P@ssw0rd" -savedir '+$($world.savePath)+'\save -public 0'
 
         Write-Verbose "The scheduled task is not found. Creating it."
         # create the task
