@@ -1,35 +1,64 @@
-﻿  #requires -version 5 -RunAsAdministrator
+﻿#requires -version 5 -RunAsAdministrator
 
 # Update-ValheimServer
 # Installs or updates the Valheim dedicated server
 
+<#
+Sample command:
+
+.\Update-ValheimServer.ps1 -Anonymous -Force -Verbose
+#>
+
 [Cmdletbinding()]
 param ( 
+        # Use an anonymous logon with Steam. Useful for automation of dedicated server updates that doen't require a Steam username.
         [switch]$Anonymous,
-        [switch]$Force,
+        
+        # Do not start dedicated server task(s) after the update is complete.
         [switch]$NoStart,
-        [switch]$pass2SecStr = $false,
-        [string]$secPass
+
+        # Prompts user for password and stores it as a secure string.
+        [switch]$pass2SecStr,
+
+        # Steam username. Not needed to update Valheim dedicated server. Use -Anonymous.
+        $steamUser = "Use Anonymous for Valheim Dedicated Server"
+
+        # Steam password as a secure string.
+        [string]$secPass,
+
+        # Supresses prompts.
+        [switch]$Force
     )
 
 
 ##### CONSTANTS #####
 
 # path to the root Valheim folder
-$gamePath = "C:\ValheimServer"
-
-# the name of the task which runs the Valheim server
-$gameTaskName = "Valheim server"
+$gamePath = "D:\ValheimServer"
 
 # the process name of the dedicated server, minus .exe
 $gameProcessName = "valheim_server"
 
-$gameListenPort = 2456
-$gameListenProtol = "UDP"
 
+[array]$worlds = @( ([pscustomobject] @{
+                        Name = "Valheim server"
+                        savePath = "D:\ValheimServer\save"
+                        port = 2458
+                        protocol = "UDP"
+                        }),
 
-$gameProcessArgs = '-nographics -batchmode -name "My Valheim Server" -port '+$gameListenPort+' -world "Dedicated" -password "MySecret" -savedir '+$gamePath+'\save -public 0'
+                    ([pscustomobject] @{
+                        Name = "Valheim Server H&H"
+                        savePath = "D:\ValheimServer\saveHH"
+                        port = 2456
+                        protocol = "UDP"}),
 
+                    ([pscustomobject] @{
+                        Name = "Valheim Server Max"
+                        savePath = "D:\ValheimServer\saveMax"
+                        port = 2460
+                        protocol = "UDP"})
+                  )
 
 # the directory where steamcmd.exe is located
 $steamCmdPath = "C:\SteamCMD"
@@ -38,11 +67,8 @@ $steamCmdPath = "C:\SteamCMD"
 $steamCMDURI = 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip'
 
 
-# Steam username
-$steamUser = "Not needed for Valheim Dedicated Server"
-
 # the steam ID of the dedicated server
-$steamGameID = '896660'
+$steamGameID = '896660' # Valheim Dedicated Server
 
 
 
@@ -98,7 +124,8 @@ function Get-WebFile
 }
 
 
-function ConvertFrom-SecureToPlain {
+function ConvertFrom-SecureToPlain 
+{
     
     param( [Parameter(Mandatory=$true)][System.Security.SecureString] $SecurePassword)
     
@@ -210,7 +237,7 @@ else
 
 
 # warning prompt.
-# controlled by noConfirm parameter switch
+# controlled by Force parameter switch
 
 if (!$Force.IsPresent) {
     $title = "Stop Valheim server"
@@ -233,13 +260,16 @@ if (!$Force.IsPresent) {
     }
 }
 
-Write-Verbose "Stopping Valheim server task."
+Write-Verbose "Stopping Valheim server task(s)."
 # stop the Valheim server task
-try
+foreach ($task in $worlds.Name)
 {
-    Stop-ScheduledTask -TaskName "$gameTaskName" -EA Stop
+    try
+    {
+        Stop-ScheduledTask -TaskName "$task" -EA Stop
+    }
+    catch {}
 }
-catch {}
 
 # make super sure all the Valheim processes are closed
 # wait one minute for graceful close then kill the process
@@ -249,7 +279,7 @@ do
 {
     Start-Sleep -Milliseconds 250
     $running = Get-Process $gameProcessName -EA SilentlyContinue
-} until (-NOT $running -or (Get-Date) -gt $startTime.AddMinutes(1))
+} until (-NOT $running -or (Get-Date) -gt $startTime.AddMinutes(3))
 
 if ($running)
 {
@@ -307,78 +337,81 @@ Start-Process $steamCmd -ArgumentList $steamArgs -WorkingDirectory "$steamCmdPat
 
 
 
-
-# start the server task
-$isTaskFnd = Get-ScheduledTask -TaskName $gameTaskName -EA SilentlyContinue
-
-if (-NOT $isTaskFnd)
+foreach ($world in $worlds)
 {
-    Write-Verbose "The scheduled task is not found. Creating it."
-    # create the task
-    $A = New-ScheduledTaskAction -Execute "cmd" -Argument "/c $gameProcessName`.exe $gameProcessArgs" -WorkingDirectory "$gamePath"
-    $T = New-ScheduledTaskTrigger -AtStartup
-    $P = New-ScheduledTaskPrincipal -UserId "LOCALSERVICE" -LogonType ServiceAccount
-    $S = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Days 365) -Compatibility Win8
-    $D = New-ScheduledTask -Action $A -Principal $P -Trigger $T -Settings $S
-    $null = Register-ScheduledTask -TaskName "$gameTaskName" -InputObject $D
+    # start the server task
+    $isTaskFnd = Get-ScheduledTask -TaskName $($world.Name) -EA SilentlyContinue
 
-    # create a firewall rule to allow the traffic to the server
-    Write-Verbose "Allowing network traffic to the server process."
-    $null = New-NetFirewallRule -Name "$gameTaskName" -DisplayName "Allows traffic to the $gameProcessName dedicated server" -Enabled True -Program "$gamePath\$gameProcessName`.exe" -Action Allow -Direction Inbound
-
-    # give LOCALSERVICE admin rights to gamePath
-    Write-Verbose "Fixing ACL's so LocalService has FullControl to the server files."
-    $acl = Get-ACL "$gamePath"
-
-    if ($acl.Access.IdentityReference.Value -notcontains 'NT AUTHORITY\LocalService')
+    if (-NOT $isTaskFnd)
     {
-        $identity = "NT AUTHORITY\LocalService"
-        $fileSystemRights = "FullControl"
-        $type = "Allow"
-        # Create new rule
-        $fileSystemAccessRuleArgumentList = $identity, $fileSystemRights, ([System.Security.AccessControl.InheritanceFlags]::ContainerInherit, [System.Security.AccessControl.InheritanceFlags]::ObjectInherit), [System.Security.AccessControl.PropagationFlags]::None, $type
-        $fileSystemAccessRule = New-Object -TypeName System.Security.AccessControl.FileSystemAccessRule -ArgumentList $fileSystemAccessRuleArgumentList
-        # Apply new rule
-        try
+        $gameProcessArgs = '-nographics -batchmode -name "My Valheim Server" -port '+$($world.Port)+' -world "Dedicated" -password "KoolKatsRule!" -savedir '+$($world.savePath)+'\save -public 0'
+
+        Write-Verbose "The scheduled task is not found. Creating it."
+        # create the task
+        $A = New-ScheduledTaskAction -Execute "cmd" -Argument "/c $gameProcessName`.exe $gameProcessArgs" -WorkingDirectory "$gamePath"
+        $T = New-ScheduledTaskTrigger -AtStartup
+        $P = New-ScheduledTaskPrincipal -UserId "LOCALSERVICE" -LogonType ServiceAccount
+        $S = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Days 365) -Compatibility Win8
+        $D = New-ScheduledTask -Action $A -Principal $P -Trigger $T -Settings $S
+        $null = Register-ScheduledTask -TaskName "$($world.Name)" -InputObject $D
+
+        # create a firewall rule to allow the traffic to the server
+        Write-Verbose "Allowing network traffic to the server process."
+        $null = New-NetFirewallRule -Name "$($world.Name)" -DisplayName "Allows traffic to the $gameProcessName dedicated server" -Enabled True -Program "$gamePath\$gameProcessName`.exe" -Action Allow -Direction Inbound
+
+        # give LOCALSERVICE admin rights to gamePath
+        Write-Verbose "Fixing ACL's so LocalService has FullControl to the server files."
+        $acl = Get-ACL "$gamePath"
+
+        if ($acl.Access.IdentityReference.Value -notcontains 'NT AUTHORITY\LocalService')
         {
-            $acl.SetAccessRule($fileSystemAccessRule)
-            Set-Acl -Path "$gamePath" -AclObject $acl -EA Stop
-        }
-        catch
-        {
-            Write-Warning "Failed to grant LocalService permissions to $gamePath. This may cause problems executing the dedicated server."
+            $identity = "NT AUTHORITY\LocalService"
+            $fileSystemRights = "FullControl"
+            $type = "Allow"
+            # Create new rule
+            $fileSystemAccessRuleArgumentList = $identity, $fileSystemRights, ([System.Security.AccessControl.InheritanceFlags]::ContainerInherit, [System.Security.AccessControl.InheritanceFlags]::ObjectInherit), [System.Security.AccessControl.PropagationFlags]::None, $type
+            $fileSystemAccessRule = New-Object -TypeName System.Security.AccessControl.FileSystemAccessRule -ArgumentList $fileSystemAccessRuleArgumentList
+            # Apply new rule
+            try
+            {
+                $acl.SetAccessRule($fileSystemAccessRule)
+                Set-Acl -Path "$gamePath" -AclObject $acl -EA Stop
+            }
+            catch
+            {
+                Write-Warning "Failed to grant LocalService permissions to $gamePath. This may cause problems executing the dedicated server."
+            }
         }
     }
+
+    if (-NOT $NoStart.IsPresent)
+    {
+        Write-Verbose "Starting the $gameTaskName task."
+        $null = Start-ScheduledTask -TaskName $($world.Name)
+
+        # look for Valheim_server.exe process before continuing
+        Write-Verbose "Waiting for the Valheim_server process."
+        do {
+            Start-Sleep -m 250
+            $process = Get-Process $gameProcessName -EA SilentlyContinue
+        } until ($process)
+
+
+        Write-Verbose "Waiting for a listener on the Valheim game port: $($world.port)"
+        Write-Verbose "This may take a very long time on first run."
+        do {
+            Start-Sleep -m 250
+            if ($($world.protocol) -eq "TCP")
+            {
+                $listening = Get-NetTCPConnection -State Listen -LocalPort $($world.port) -EA SilentlyContinue
+            }
+            elseif ($($world.protocol) -eq "UDP") 
+            {
+                $listening = Get-NetUDPEndpoint -LocalPort $($world.port) -EA SilentlyContinue
+            }
+        } until ($listening)
+    }
 }
-
-if (-NOT $NoStart.IsPresent)
-{
-    Write-Verbose "Starting the $gameTaskName task."
-    $null = Start-ScheduledTask -TaskName $gameTaskName
-
-    # look for Valheim_server.exe process before continuing
-    Write-Verbose "Waiting for the Valheim_server process."
-    do {
-        Start-Sleep -m 250
-        $process = Get-Process $gameProcessName -EA SilentlyContinue
-    } until ($process)
-
-
-    Write-Verbose "Waiting for a listener on the Valheim game port: $gameListenPort"
-    Write-Verbose "This may take a very long time on first run."
-    do {
-        Start-Sleep -m 250
-        if ($gameListenProtol -eq "TCP")
-        {
-            $listening = Get-NetTCPConnection -OwningProcess ($process.Id) -State Listen -LocalPort $gameListenPort -EA SilentlyContinue
-        }
-        elseif ($gameListenProtol -eq "UDP") 
-        {
-            $listening = Get-NetUDPEndpoint -OwningProcess $process.Id -LocalPort $gameListenPort -EA SilentlyContinue
-        }
-    } until ($listening)
-}
-
 
 
 
